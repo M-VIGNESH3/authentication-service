@@ -1,0 +1,24 @@
+name: Snyk Security Scan
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  snyk-scan:
+    runs-on: self-hosted   # ✅ uses your runner
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Snyk
+        run: snyk auth ${{ secrets.SNYK_TOKEN }}
+
+      - name: Snyk Dependency Scan
+        run: snyk test --severity-threshold=high
+
+      - name: Upload results to Snyk
+        run: snyk monitor
