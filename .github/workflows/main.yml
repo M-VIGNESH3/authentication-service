@@ -1,114 +1,102 @@
-name: CI Security Pipeline
-
+name: SonarCloud Analysis & Quality Gate
+ 
 on:
+
   push:
-    branches: [ main, develop ]
+
+    branches: [ "main", "develop" ]
+
   pull_request:
 
+    types: [opened, synchronize, reopened]
+ 
 jobs:
-  sonar-quality:
-    name: SonarCloud Code Quality
+
+  sonar-scan:
+
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+
+      # Step 1: Checkout with full history (required for Sonar)
+
+      - name: Checkout Code
+
+        uses: actions/checkout@v4
+
+        with:
+
+          fetch-depth: 0
+ 
+      # Step 2: Run the actual Sonar Scan
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+
+        uses: SonarSource/sonarcloud-github-action@v3.1.0
+
         env:
+
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
         with:
-          projectBaseDir: .
+
           args: >
-            -Dsonar.organization=${{ secrets.SONAR_ORG }}
-            -Dsonar.projectKey=${{ github.repository }}
 
-      - name: Sonar Quality Gate Check
-        uses: sonarsource/sonarqube-quality-gate-action@master
+            -Dsonar.projectKey=your_project_key
+
+            -Dsonar.organization=your_org_name
+
+            -Dsonar.sources=.
+ 
+      # Step 3: Wait for SonarCloud to finish and check the Gate status
+
+      - name: SonarCloud Quality Gate Check
+
+        id: sonarqube-quality-gate-check
+
+        uses: sonarsource/sonarcloud-quality-gate-action@master
+
         timeout-minutes: 5
+
         env:
+
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+ 
+      # Step 4: Send email ONLY if the Quality Gate fails
 
-      - name: Notify Sonar Failure
-        if: failure()
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"❌ Sonar Quality Gate Failed for '${{ github.repository }}'"}' \
-          ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Send Email on Failure
 
-  snyk-sca:
-    name: Snyk Dependency Scan
-    runs-on: ubuntu-latest
-    needs: sonar-quality
+        if: failure() && steps.sonarqube-quality-gate-check.outcome == 'failure'
 
-    steps:
-      - uses: actions/checkout@v4
+        uses: dawidd6/action-send-mail@v3
 
-      - name: Snyk Open Source Scan
-        uses: snyk/actions/node@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: test --severity-threshold=medium
 
-      - name: Notify Snyk Failure
-        if: failure()
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"❌ Snyk SCA failed – vulnerabilities found in '${{ github.repository }}'"}' \
-          ${{ secrets.SLACK_WEBHOOK_URL }}
+          server_address: smtp.gmail.com # Change if using SendGrid/Outlook
 
-  docker-build:
-    name: Build Docker Image
-    runs-on: ubuntu-latest
-    needs: snyk-sca
+          server_port: 465
 
-    steps:
-      - uses: actions/checkout@v4
+          username: ${{ secrets.MAIL_USERNAME }}
 
-      - name: Docker Build
-        run: |
-          docker build -t ${{ github.repository }}:${{ github.sha }} .
+          password: ${{ secrets.MAIL_PASSWORD }}
 
-  container-scan:
-    name: Docker Image Scan
-    runs-on: ubuntu-latest
-    needs: docker-build
+          subject: "❌ Quality Gate Failed: ${{ github.repository }}"
 
-    steps:
-      - uses: actions/checkout@v4
+          to: your-email@example.com
 
-      - name: Snyk Container Scan
-        uses: snyk/actions/docker@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          image: ${{ github.repository }}:${{ github.sha }}
-          args: --severity-threshold=medium
+          from: GitHub Actions CI
 
-      - name: Notify Container Scan Failure
-        if: failure()
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"❌ Docker image vulnerabilities (HIGH/MEDIUM) found in '${{ github.repository }}'"}' \
-          ${{ secrets.SLACK_WEBHOOK_URL }}
+          body: |
 
-  push-image:
-    name: Push Secure Image
-    runs-on: ubuntu-latest
-    needs: container-scan
+            The Quality Gate has failed for the latest push.
 
-    steps:
-      - name: Docker Login
-        run: |
-          echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+            Repo: ${{ github.repository }}
 
-      - name: Push Image
-        run: |
-          docker push ${{ github.repository }}:${{ github.sha }}
+            Branch: ${{ github.ref_name }}
 
-      - name: Success Notification
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"✅ Secure Docker image pushed successfully: '${{ github.repository }}'"}' \
-          ${{ secrets.SLACK_WEBHOOK_URL }}
+            Commit: ${{ github.sha }}
+
+            Check the details on the SonarCloud dashboard.
+ 
